@@ -269,23 +269,36 @@ def generate_fk_payment_link(order_id, amount, user_id):
     params = {
         'merchant_id': FK_SHOP_ID,
         'amount': amount,
-        'order_id': comment,  # Важно: order_id вместо o
+        'order_id': comment,
         'currency': 'RUB',
         'language': 'ru',
-        'wallet': 'true',  # Флаг что это FK Wallet
+        'wallet': 'true',
     }
     
-    # Подпись для FK Wallet
-    sign_str = f"{FK_SHOP_ID}:{amount}:{FK_SECRET_KEY}:{comment}"
-    sign = hashlib.md5(sign_str.encode()).hexdigest()
-    params['sign'] = sign
+    # 🔥 Пробуем оба варианта подписи
+    # Вариант 1: С FK_SECRET_KEY (первое секретное слово)
+    sign_str1 = f"{FK_SHOP_ID}:{amount}:{FK_SECRET_KEY}:{comment}"
+    sign1 = hashlib.md5(sign_str1.encode()).hexdigest()
+    
+    # Вариант 2: С FK_SECRET_KEY2 (второе секретное слово)
+    sign_str2 = f"{FK_SHOP_ID}:{amount}:{FK_SECRET_KEY2}:{comment}"
+    sign2 = hashlib.md5(sign_str2.encode()).hexdigest()
+    
+    # Используем первый вариант, но логируем для проверки
+    logger.info(f"🔐 Подпись 1 (FK_SECRET_KEY): {sign_str1} -> {sign1[:10]}...")
+    logger.info(f"🔐 Подпись 2 (FK_SECRET_KEY2): {sign_str2} -> {sign2[:10]}...")
+    
+    # По умолчанию используем FK_SECRET_KEY
+    params['sign'] = sign1
     
     # URL для FK Wallet
-    base_url = "https://fkwallet.free-kassa.ru/pay/"
+    base_url = "https://wallet.free-kassa.ru/pay"
     query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
     
-    return f"{base_url}?{query_string}"
-
+    final_url = f"{base_url}?{query_string}"
+    logger.info(f"🔗 Ссылка: {final_url[:80]}...")
+    
+    return final_url
 
 @dp.callback_query(F.data.startswith("check_"))
 async def check_payment(callback: types.CallbackQuery):
@@ -538,4 +551,5 @@ async def main():
 if __name__ == "__main__":
 
     asyncio.run(main())
+
 
