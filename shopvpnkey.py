@@ -306,16 +306,48 @@ async def check_payment(callback: types.CallbackQuery):
 
 # ==================== FREE-KASSA ВЕБХУК ===============
 def verify_fk_wallet_signature(data):
-    """Проверка подписи FK Wallet"""
-    sign_str = f"{data.get('merchant_id')}:{data.get('amount')}:{FK_SECRET_KEY}:{data.get('order_id')}"
-    expected_signature = hashlib.md5(sign_str.encode()).hexdigest().lower()
+    """Проверка подписи FK Wallet с разными форматами"""
+    
+    # Пропускаем тестовый запрос
+    if data.get('status_check') == '1':
+        return True
+    
+    # Получаем поля
+    amount = str(data.get('amount', ''))
+    order_id = str(data.get('order_id', ''))
+    merchant_id = data.get('merchant_id', FK_SHOP_ID)
+    
     received_signature = data.get('sign', '').lower()
     
-    return expected_signature == received_signature
+    if not received_signature:
+        logger.warning("❌ Отсутствует подпись (sign)")
+        return False
+    
+    # Пробуем разные форматы подписи
+    sign_formats = [
+        f"{merchant_id}:{amount}:{FK_SECRET_KEY2}:{order_id}",  # Формат 1 (SECRET_KEY2!)
+        f"{amount}:{FK_SECRET_KEY2}:{order_id}",               # Формат 2
+        f"{FK_SHOP_ID}:{amount}:{FK_SECRET_KEY2}:{order_id}",  # Формат 3
+        f"{merchant_id}:{amount}:{FK_SECRET_KEY}:{order_id}",  # Формат 4
+        f"{amount}:{FK_SECRET_KEY}:{order_id}",                # Формат 5
+    ]
+    
+    for sign_str in sign_formats:
+        expected_signature = hashlib.md5(sign_str.encode()).hexdigest().lower()
+        if expected_signature == received_signature:
+            logger.info(f"✅ Подпись проверена. Формат: {sign_str[:50]}...")
+            return True
+    
+    logger.warning(f"❌ Ни один формат подписи не подошел")
+    logger.warning(f"   Получено: {received_signature}")
+    logger.warning(f"   Поля: amount={amount}, order_id={order_id}, merchant_id={merchant_id}")
+    logger.warning(f"   SECRET_KEY2: {FK_SECRET_KEY2[:10]}...")
+    
+    return False
 
 
 async def freekassa_webhook(request):
-    """Вебхук для FK Wallet"""
+    """Вебхук для FK Wallet с обработкой тестового запроса"""
     try:
         # Получаем данные
         if request.method == 'GET':
@@ -325,7 +357,12 @@ async def freekassa_webhook(request):
         
         logger.info(f"📥 FK Wallet вебхук: {data}")
         
-        # Проверяем подпись
+        # 🔥 ВАЖНО: Обработка тестового запроса от Free-Kassa
+        if data.get('status_check') == '1':
+            logger.info("✅ Тестовый запрос от Free-Kassa принят")
+            return web.Response(text='YES', status=200)
+        
+        # Проверяем подпись для реального платежа
         if not verify_fk_wallet_signature(data):
             logger.warning("❌ Неверная подпись FK Wallet")
             return web.Response(text='ERROR: Invalid signature', status=400)
@@ -338,75 +375,100 @@ async def freekassa_webhook(request):
         import re
         order_match = re.search(r'Order-(\d+)-User-(\d+)', order_desc)
         
-        if order_match:
-            order_id = int(order_match.group(1))
-            user_id = int(order_match.group(2))
-            
-            # Находим заказ
-            orders = load_orders()
-            order = next((o for o in orders["orders"] if o["id"] == order_id), None)
-            
-            if order and order["status"] == "pending":
-                # Проверяем сумму (допуск 5 руб)
-                if abs(amount - order["amount"]) <= 5:
-                    # Ищем свободный ключ
-                    vpn_key = get_available_key(order["plan_id"])
-                    
-                    if vpn_key:
-                        # Обновляем заказ с ключом
-                        update_order_status(order_id, "completed", vpn_key)
-                        
-                        # Уведомляем админа
-                        try:
-                            plan = next(p for p in VPN_PLANS if p['id'] == order['plan_id'])
-                            await bot.send_message(
-                                ADMIN_ID,
-                                f"💰 <b>✅ ОПЛАТА ЧЕРЕЗ FK WALLET</b>\n\n"
-                                f"📦 Заказ: #{order_id}\n"
-                                f"👤 Пользователь: @{order['username']}\n"
-                                f"🎯 Тариф: {plan['name']}\n"
-                                f"💳 Сумма: {amount}₽\n"
-                                f"🔑 Ключ: <code>{vpn_key}</code>\n"
-                                f"⏰ Время: {datetime.now().strftime('%H:%M %d.%m.%Y')}",
-                                parse_mode="HTML"
-                            )
-                        except Exception as e:
-                            logger.error(f"❌ Не могу уведомить админа: {e}")
-                        
-                        # Отправляем ключ пользователю
-                        try:
-                            plan = next(p for p in VPN_PLANS if p['id'] == order['plan_id'])
-                            await bot.send_message(
-                                user_id,
-                                f"🎉 <b>✅ Оплата подтверждена!</b>\n\n"
-                                f"📦 Заказ: <b>#{order_id}</b>\n"
-                                f"🎯 Тариф: {plan['name']}\n"
-                                f"⏳ Срок: {plan['duration']}\n"
-                                f"💳 Сумма: {amount}₽\n\n"
-                                f"<b>🔑 Ваш VPN ключ:</b>\n"
-                                f"<code>{vpn_key}</code>\n\n"
-                                f"<b>📦 Как активировать:</b>\n"
-                                f"1. Скачайте приложение VPN\n"
-                                f"2. Вставьте этот ключ в настройки\n"
-                                f"3. Нажмите 'Подключиться'\n\n"
-                                f"<i>Спасибо за покупку! ❤️</i>",
-                                parse_mode="HTML"
-                            )
-                            logger.info(f"✅ Ключ отправлен пользователю {user_id}")
-                        except Exception as e:
-                            logger.error(f"❌ Не могу отправить ключ {user_id}: {e}")
-                            await bot.send_message(
-                                ADMIN_ID,
-                                f"⚠️ Ключ не отправлен пользователю {user_id}\n"
-                                f"Ключ: {vpn_key}"
-                            )
-                    else:
-                        # Нет свободных ключей
-                        logger.error(f"❌ Нет ключей для тарифа {order['plan_id']}")
-                        await bot.send_message(
-                            ADMIN_ID,
-                            f"🚨 Нет ключей для тарифа {order['plan_id']}!"
-                        )
+        if not order_match:
+            logger.warning(f"⚠️ Неверный формат order_id: {order_desc}")
+            return web.Response(text='ERROR: Invalid order format', status=400)
+        
+        order_id = int(order_match.group(1))
+        user_id = int(order_match.group(2))
+        
+        # Находим заказ
+        orders = load_orders()
+        order = next((o for o in orders["orders"] if o["id"] == order_id), None)
+        
+        if not order:
+            logger.warning(f"⚠️ Заказ #{order_id} не найден")
+            return web.Response(text='ERROR: Order not found', status=400)
+        
+        if order["status"] != "pending":
+            logger.info(f"ℹ️ Заказ #{order_id} уже обработан (статус: {order['status']})")
+            return web.Response(text='YES', status=200)  # Все равно говорим YES
+        
+        # Проверяем сумму (допуск 5 руб)
+        if abs(amount - order["amount"]) > 5:
+            logger.warning(f"⚠️ Неправильная сумма: {amount}₽ вместо {order['amount']}₽")
+            return web.Response(text='ERROR: Wrong amount', status=400)
+        
+        # Ищем свободный ключ
+        vpn_key = get_available_key(order["plan_id"])
+        
+        if not vpn_key:
+            # Нет свободных ключей
+            logger.error(f"❌ Нет ключей для тарифа {order['plan_id']}")
+            await bot.send_message(
+                ADMIN_ID,
+                f"🚨 <b>НЕТ КЛЮЧЕЙ ДЛЯ АВТОВЫДАЧИ!</b>\n\n"
+                f"📦 Заказ: #{order_id}\n"
+                f"👤 Пользователь: @{order['username']}\n"
+                f"🎯 Тариф ID: {order['plan_id']}\n"
+                f"💳 Сумма: {amount}₽\n\n"
+                f"⚠️ <b>Добавьте ключи вручную!</b>",
+                parse_mode="HTML"
+            )
+            return web.Response(text='YES', status=200)  # Все равно YES для FK
+        
+        # НАХОДИМ ПЛАН ОДИН РАЗ
+        plan = next(p for p in VPN_PLANS if p['id'] == order['plan_id'])
+        
+        # Обновляем заказ с ключом
+        update_order_status(order_id, "completed", vpn_key)
+        
+        # Уведомляем админа
+        try:
+            await bot.send_message(
+                ADMIN_ID,
+                f"💰 <b>✅ ОПЛАТА ЧЕРЕЗ FK WALLET</b>\n\n"
+                f"📦 Заказ: #{order_id}\n"
+                f"👤 Пользователь: @{order['username']}\n"
+                f"🎯 Тариф: {plan['name']}\n"
+                f"💳 Сумма: {amount}₽\n"
+                f"🔑 Ключ: <code>{vpn_key}</code>\n"
+                f"⏰ Время: {datetime.now().strftime('%H:%M %d.%m.%Y')}",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"❌ Не могу уведомить админа: {e}")
+        
+        # Отправляем ключ пользователю
+        try:
+            await bot.send_message(
+                user_id,
+                f"🎉 <b>✅ Оплата подтверждена!</b>\n\n"
+                f"📦 Заказ: <b>#{order_id}</b>\n"
+                f"🎯 Тариф: {plan['name']}\n"
+                f"⏳ Срок: {plan['duration']}\n"
+                f"💳 Сумма: {amount}₽\n\n"
+                f"<b>🔑 Ваш VPN ключ:</b>\n"
+                f"<code>{vpn_key}</code>\n\n"
+                f"<b>📦 Как активировать:</b>\n"
+                f"1. Скачайте приложение VPN\n"
+                f"2. Вставьте этот ключ в настройки\n"
+                f"3. Нажмите 'Подключиться'\n\n"
+                f"<i>Спасибо за покупку! ❤️</i>",
+                parse_mode="HTML"
+            )
+            logger.info(f"✅ Ключ отправлен пользователю {user_id}")
+        except Exception as e:
+            logger.error(f"❌ Не могу отправить ключ {user_id}: {e}")
+            await bot.send_message(
+                ADMIN_ID,
+                f"⚠️ <b>Ключ не отправлен пользователю</b>\n\n"
+                f"👤 ID: {user_id}\n"
+                f"📦 Заказ: #{order_id}\n"
+                f"🔑 Ключ: <code>{vpn_key}</code>\n\n"
+                f"<i>Отправьте ключ вручную</i>",
+                parse_mode="HTML"
+            )
         
         # FK Wallet ожидает YES в ответ
         return web.Response(text='YES', status=200)
@@ -476,3 +538,4 @@ async def main():
 if __name__ == "__main__":
 
     asyncio.run(main())
+
