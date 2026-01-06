@@ -262,27 +262,28 @@ async def plan_detail(callback: types.CallbackQuery):
 
 
 def generate_fk_payment_link(order_id, amount, user_id):
-    """Генерирует ссылку на оплату Free-Kassa"""
+    """Генерирует ссылку на оплату через FK Wallet"""
     comment = f"Order-{order_id}-User-{user_id}"
-
-    # Параметры
+    
+    # Параметры для FK Wallet
     params = {
-        'm': FK_SHOP_ID,
-        'oa': amount,
-        'o': comment,
+        'merchant_id': FK_SHOP_ID,
+        'amount': amount,
+        'order_id': comment,  # Важно: order_id вместо o
         'currency': 'RUB',
-        'lang': 'ru',
+        'language': 'ru',
+        'wallet': 'true',  # Флаг что это FK Wallet
     }
-
-    # Подпись (Секретное слово 1)
-    sign_str = f"{FK_SHOP_ID}:{amount}:{FK_SECRET_KEY}:RUB:{comment}"
+    
+    # Подпись для FK Wallet
+    sign_str = f"{FK_SHOP_ID}:{amount}:{FK_SECRET_KEY}:{comment}"
     sign = hashlib.md5(sign_str.encode()).hexdigest()
-    params['s'] = sign
-
-    # Формируем URL
-    base_url = "https://pay.free-kassa.ru/"
+    params['sign'] = sign
+    
+    # URL для FK Wallet
+    base_url = "https://fkwallet.free-kassa.ru/pay/"
     query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-
+    
     return f"{base_url}?{query_string}"
 
 
@@ -304,61 +305,63 @@ async def check_payment(callback: types.CallbackQuery):
 # ... (вставьте сюда код из предыдущих сообщений для этих функций)
 
 # ==================== FREE-KASSA ВЕБХУК ===============
-def verify_fk_signature(data):
-    """Проверка подписи Free-Kassa вебхука"""
-    # Free-Kassa отправляет: MERCHANT_ID + AMOUNT + SECRET_KEY2
-    sign_str = f"{FK_SHOP_ID}:{data['AMOUNT']}:{FK_SECRET_KEY2}"
+def verify_fk_wallet_signature(data):
+    """Проверка подписи FK Wallet"""
+    sign_str = f"{data.get('merchant_id')}:{data.get('amount')}:{FK_SECRET_KEY}:{data.get('order_id')}"
     expected_signature = hashlib.md5(sign_str.encode()).hexdigest().lower()
-    received_signature = data.get('SIGN', '').lower()
-
+    received_signature = data.get('sign', '').lower()
+    
     return expected_signature == received_signature
 
 
 async def freekassa_webhook(request):
-    """Вебхук для Free-Kassa (GET запрос)"""
+    """Вебхук для FK Wallet"""
     try:
-        # Free-Kassa отправляет GET параметры
-        data = dict(request.query)
-
-        logger.info(f"📥 Free-Kassa вебхук: {data}")
-
+        # Получаем данные
+        if request.method == 'GET':
+            data = dict(request.query)
+        else:
+            data = dict(await request.post())
+        
+        logger.info(f"📥 FK Wallet вебхук: {data}")
+        
         # Проверяем подпись
-        if not verify_fk_signature(data):
-            logger.warning("❌ Неверная подпись Free-Kassa")
+        if not verify_fk_wallet_signature(data):
+            logger.warning("❌ Неверная подпись FK Wallet")
             return web.Response(text='ERROR: Invalid signature', status=400)
-
+        
         # Извлекаем данные
-        amount = float(data.get('AMOUNT', 0))
-        order_desc = data.get('MERCHANT_ORDER_ID', '')
-
+        amount = float(data.get('amount', 0))
+        order_desc = data.get('order_id', '')
+        
         # Парсим комментарий: Order-{id}-User-{user_id}
         import re
         order_match = re.search(r'Order-(\d+)-User-(\d+)', order_desc)
-
+        
         if order_match:
             order_id = int(order_match.group(1))
             user_id = int(order_match.group(2))
-
+            
             # Находим заказ
             orders = load_orders()
             order = next((o for o in orders["orders"] if o["id"] == order_id), None)
-
+            
             if order and order["status"] == "pending":
                 # Проверяем сумму (допуск 5 руб)
                 if abs(amount - order["amount"]) <= 5:
                     # Ищем свободный ключ
                     vpn_key = get_available_key(order["plan_id"])
-
+                    
                     if vpn_key:
                         # Обновляем заказ с ключом
                         update_order_status(order_id, "completed", vpn_key)
-
+                        
                         # Уведомляем админа
                         try:
                             plan = next(p for p in VPN_PLANS if p['id'] == order['plan_id'])
                             await bot.send_message(
                                 ADMIN_ID,
-                                f"💰 <b>✅ ОПЛАТА ЧЕРЕЗ FREE-KASSA</b>\n\n"
+                                f"💰 <b>✅ ОПЛАТА ЧЕРЕЗ FK WALLET</b>\n\n"
                                 f"📦 Заказ: #{order_id}\n"
                                 f"👤 Пользователь: @{order['username']}\n"
                                 f"🎯 Тариф: {plan['name']}\n"
@@ -369,7 +372,7 @@ async def freekassa_webhook(request):
                             )
                         except Exception as e:
                             logger.error(f"❌ Не могу уведомить админа: {e}")
-
+                        
                         # Отправляем ключ пользователю
                         try:
                             plan = next(p for p in VPN_PLANS if p['id'] == order['plan_id'])
@@ -404,12 +407,12 @@ async def freekassa_webhook(request):
                             ADMIN_ID,
                             f"🚨 Нет ключей для тарифа {order['plan_id']}!"
                         )
-
-        # Free-Kassa ожидает YES в ответ
+        
+        # FK Wallet ожидает YES в ответ
         return web.Response(text='YES', status=200)
-
+        
     except Exception as e:
-        logger.error(f"❌ Ошибка вебхука Free-Kassa: {e}")
+        logger.error(f"❌ Ошибка вебхука FK Wallet: {e}")
         return web.Response(text='ERROR', status=500)
 
 
@@ -471,4 +474,5 @@ async def main():
 
 
 if __name__ == "__main__":
+
     asyncio.run(main())
