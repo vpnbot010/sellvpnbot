@@ -9,7 +9,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8538291174:AAGpSIYxAG1YTLgpdXX5HGYy_6NXE9X0p
 # Обработка ADMIN_IDS
 def parse_admin_ids() -> List[int]:
     """Парсим ID администраторов из переменной окружения"""
-    admin_ids_str = os.getenv("ADMIN_IDS", "702517414,6289277359")
+    admin_ids_str = os.getenv("ADMIN_IDS", "7025174146,6289277359")
 
     if not admin_ids_str:
         return [7025174146, 6289277359]  # Значение по умолчанию
@@ -31,18 +31,6 @@ def parse_admin_ids() -> List[int]:
 
 
 ADMIN_IDS = parse_admin_ids()
-
-# Проверка в продакшене
-if os.getenv("RENDER") or os.getenv("RAILWAY_STATIC_URL") or os.getenv("FLY_APP_NAME"):
-    print(f"🔧 Режим: PRODUCTION")
-    print(f"📋 Админы: {ADMIN_IDS}")
-
-    # Проверяем, что токен не дефолтный
-    if BOT_TOKEN == "8538291174:AAGpSIYxAG1YTLgpdXX5HGYy_6NXE9X0pQU":
-        print("⚠️ ВНИМАНИЕ: Используется дефолтный BOT_TOKEN! Установите переменную окружения.")
-else:
-    print(f"🔧 Режим: DEVELOPMENT")
-    print(f"📋 Админы: {ADMIN_IDS}")
 
 # Настройки оплаты
 CARD_NUMBER = os.getenv("CARD_NUMBER", "2200701240653037")
@@ -221,32 +209,3 @@ def export_to_json(filename: str = "config_backup.json"):
 # Автоматический экспорт при запуске в development режиме
 if __name__ == "__main__" and not os.getenv("RENDER"):
     export_to_json()
-
-
-# Дополнительные проверки
-def validate_config():
-    """Проверка конфигурации"""
-    errors = []
-
-    if not BOT_TOKEN or BOT_TOKEN == "8538291174:AAGpSIYxAG1YTLgpdXX5HGYy_6NXE9X0pQU":
-        errors.append("BOT_TOKEN не установлен или используется дефолтный токен")
-
-    if not ADMIN_IDS:
-        errors.append("ADMIN_IDS пустой")
-
-    if not CASES:
-        errors.append("CASES не загружены")
-
-    if errors:
-        print("❌ Ошибки конфигурации:")
-        for error in errors:
-            print(f"  - {error}")
-        return False
-
-    print("✅ Конфигурация загружена корректно")
-    return True
-
-
-# Проверяем конфиг при импорте
-if __name__ != "__main__":
-    validate_config()
