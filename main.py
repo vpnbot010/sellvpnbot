@@ -1,10 +1,12 @@
 import asyncio
 import logging
 import os
+import sys
 from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -24,7 +26,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         pass  # Отключаем логи
 
 def start_health_server():
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenv("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), HealthHandler)
     print(f"🌐 Health server started on port {port}")
     server.serve_forever()
@@ -37,7 +39,7 @@ health_thread.start()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8538291174:AAGpSIYxAG1YTLgpdXX5HGYy_6NXE9X0pQU")
 
 router = Router()
 
@@ -46,7 +48,12 @@ async def start_cmd(message: Message):
     await message.answer("✅ Бот работает на Render!")
 
 async def main():
-    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+    # ПРАВИЛЬНОЕ создание бота для aiogram 3.x
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+    
     dp = Dispatcher()
     dp.include_router(router)
     
