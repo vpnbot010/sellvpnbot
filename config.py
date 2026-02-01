@@ -3,7 +3,7 @@ import json
 from typing import List, Dict, Any
 
 # Загружаем переменные окружения
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8538291174:AAGpSIYxAG1YTLgpdXX5HGYy_6NXE9X0pQU")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8218178188:AAEnQZtbwdxexLvIZ-1Sm9ihXqFnjIIjmx0")
 
 
 # Обработка ADMIN_IDS
@@ -46,7 +46,7 @@ STARS_TO_RUB = 1.67  # 1 звезда = 1.67 рубля (примерно)
 MIN_STARS_PURCHASE = 10  # Минимальная покупка звездами
 
 # Канал для отзывов
-REVIEW_CHANNEL_ID = os.getenv("REVIEW_CHANNEL_ID", "@otzovikco2")
+REVIEW_CHANNEL_ID = os.getenv("REVIEW_CHANNEL_ID", "@sharpdrop655")
 
 
 # Можно вынести кейсы в отдельный файл или переменную окружения для гибкости
@@ -209,3 +209,4 @@ def export_to_json(filename: str = "config_backup.json"):
 # Автоматический экспорт при запуске в development режиме
 if __name__ == "__main__" and not os.getenv("RENDER"):
     export_to_json()
+
